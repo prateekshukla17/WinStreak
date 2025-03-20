@@ -1,118 +1,121 @@
 import React, { useState, useEffect } from 'react';
-import { createClient } from '@supabase/supabase-js';
+import { supabase } from '../lib/supabase';
+import { useAuthStore } from '../store/auth';
 
-const supabaseUrl =
-  'https://your-https://renxiycpyairqycuaxxa.supabase.co-url.supabase.co';
-const supabaseKey =
-  'your-eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJlbnhpeWNweWFpcnF5Y3VheHhhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDEzMjU3NTYsImV4cCI6MjA1NjkwMTc1Nn0.sJXNqeR5s_lCRY0L8mDidOa1SF82cvSaec1LxmAFfYk-key';
-const supabase = createClient(supabaseUrl, supabaseKey);
-
-interface User {
-  id: string;
-  name: string;
-  completedGoals: number;
-  totalEarnings: number;
+interface UserStats {
+  user_id: string;
+  email: string;
+  completed_goals: number;
+  total_stake: number;
+  potential_loss: number;
 }
 
 export default function Leaderboard() {
-  const [users, setUsers] = useState<User[]>([]);
+  const [userStats, setUserStats] = useState<UserStats[]>([]);
   const [loading, setLoading] = useState(true);
+  const currentUser = useAuthStore((state) => state.user);
 
   useEffect(() => {
-    fetchLeaderboardData();
-    const subscription = supabase
-      .channel('public:goals')
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'goals' },
-        () => {
-          fetchLeaderboardData();
-        }
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(subscription);
-    };
+    fetchUserStats();
   }, []);
 
-  const fetchLeaderboardData = async () => {
-    setLoading(true);
-    const { data: profiles, error: profilesError } = await supabase
-      .from('profiles')
-      .select('id, name');
-    if (profilesError) {
-      console.error('Error fetching profiles:', profilesError);
+  const fetchUserStats = async () => {
+    try {
+      const { data: goals, error: goalsError } = await supabase
+        .from('goals')
+        .select('*');
+
+      if (goalsError) throw goalsError;
+
+      const { data: users, error: usersError } = await supabase
+        .from('users')
+        .select('id, email');
+
+      if (usersError) throw usersError;
+
+      const stats = users.map((user) => {
+        const userGoals = goals.filter((goal) => goal.user_id === user.id);
+        return {
+          user_id: user.id,
+          email: user.email,
+          completed_goals: userGoals.filter((goal) => goal.completed).length,
+          total_stake: userGoals.reduce((sum, goal) => sum + goal.stake, 0),
+          potential_loss: userGoals
+            .filter((goal) => !goal.completed)
+            .reduce((sum, goal) => sum + goal.stake, 0),
+        };
+      });
+
+      // Sort by completed goals (descending) and then by total stake (descending)
+      stats.sort((a, b) => {
+        if (b.completed_goals !== a.completed_goals) {
+          return b.completed_goals - a.completed_goals;
+        }
+        return b.total_stake - a.total_stake;
+      });
+
+      setUserStats(stats);
+    } catch (error) {
+      console.error('Error fetching user stats:', error);
+    } finally {
       setLoading(false);
-      return;
     }
-
-    const { data: goals, error: goalsError } = await supabase
-      .from('goals')
-      .select('user_id, stake');
-    if (goalsError) {
-      console.error('Error fetching goals:', goalsError);
-      setLoading(false);
-      return;
-    }
-
-    const userStats = profiles.map((profile) => {
-      const userGoals = goals.filter((goal) => goal.user_id === profile.id);
-      const completedGoals = userGoals.length;
-      const totalEarnings = userGoals.reduce(
-        (sum, goal) => sum + goal.stake,
-        0
-      );
-      return {
-        id: profile.id,
-        name: profile.name,
-        completedGoals,
-        totalEarnings,
-      };
-    });
-
-    setUsers(userStats.sort((a, b) => b.completedGoals - a.completedGoals));
-    setLoading(false);
   };
 
+  if (loading) {
+    return (
+      <div className='flex justify-center items-center h-64'>
+        <div className='animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-500'></div>
+      </div>
+    );
+  }
+
   return (
-    <div className='p-4'>
+    <div className='space-y-6'>
       <h1 className='text-2xl font-semibold text-gray-900'>Leaderboard</h1>
-      {loading ? (
-        <div className='mt-4 space-y-4'>
-          {[...Array(5)].map((_, index) => (
-            <div key={index} className='animate-pulse flex space-x-4'>
-              <div className='rounded-full bg-gray-300 h-12 w-12'></div>
-              <div className='flex-1 space-y-4 py-1'>
-                <div className='h-4 bg-gray-300 rounded w-3/4'></div>
-                <div className='space-y-2'>
-                  <div className='h-4 bg-gray-300 rounded'></div>
-                  <div className='h-4 bg-gray-300 rounded w-5/6'></div>
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
-      ) : (
-        <ul className='mt-4 space-y-4'>
-          {users.map((user) => (
+
+      <div className='bg-white shadow overflow-hidden sm:rounded-md'>
+        <ul className='divide-y divide-gray-200'>
+          {userStats.map((user, index) => (
             <li
-              key={user.id}
-              className='flex justify-between items-center p-4 border border-gray-300 rounded-md'
+              key={user.user_id}
+              className={`${
+                user.user_id === currentUser?.id ? 'bg-indigo-50' : ''
+              }`}
             >
-              <div>
-                <p className='text-lg font-medium text-gray-900'>{user.name}</p>
-                <p className='text-sm text-gray-500'>
-                  Completed Goals: {user.completedGoals}
-                </p>
-                <p className='text-sm text-gray-500'>
-                  Total Earnings: ${user.totalEarnings.toFixed(2)}
-                </p>
+              <div className='px-4 py-4 sm:px-6'>
+                <div className='flex items-center justify-between'>
+                  <div className='flex items-center'>
+                    <div className='flex-shrink-0'>
+                      <div className='h-10 w-10 rounded-full bg-indigo-500 flex items-center justify-center'>
+                        <span className='text-white font-bold'>
+                          {index + 1}
+                        </span>
+                      </div>
+                    </div>
+                    <div className='ml-4'>
+                      <div className='text-sm font-medium text-gray-900'>
+                        {user.email}
+                      </div>
+                      <div className='text-sm text-gray-500'>
+                        {user.completed_goals} completed goals
+                      </div>
+                    </div>
+                  </div>
+                  <div className='flex items-center space-x-4'>
+                    <div className='text-sm text-gray-500'>
+                      Total Stake: ${user.total_stake}
+                    </div>
+                    <div className='text-sm text-red-500'>
+                      Potential Loss: ${user.potential_loss}
+                    </div>
+                  </div>
+                </div>
               </div>
             </li>
           ))}
         </ul>
-      )}
+      </div>
     </div>
   );
 }

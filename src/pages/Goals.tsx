@@ -1,62 +1,106 @@
 import React, { useState, useEffect } from 'react';
-import { createClient } from '@supabase/supabase-js';
-
-const supabaseUrl = 'https://renxiycpyairqycuaxxa.supabase.co';
-const supabaseKey =
-  'your-eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJlbnhpeWNweWFpcnF5Y3VheHhhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDEzMjU3NTYsImV4cCI6MjA1NjkwMTc1Nn0.sJXNqeR5s_lCRY0L8mDidOa1SF82cvSaec1LxmAFfYk-key';
-const supabase = createClient(supabaseUrl, supabaseKey);
+import { supabase } from '../lib/supabase';
+import { useAuthStore } from '../store/auth';
 
 interface Goal {
   id: number;
   description: string;
   stake: number;
+  user_id: string;
 }
 
 export default function Goals() {
   const [goals, setGoals] = useState<Goal[]>([]);
   const [description, setDescription] = useState('');
   const [stake, setStake] = useState<number | ''>('');
+  const user = useAuthStore((state) => state.user);
 
   useEffect(() => {
-    fetchGoals();
-  }, []);
+    if (user) {
+      fetchGoals();
+    }
+  }, [user]);
 
   const fetchGoals = async () => {
-    const { data, error } = await supabase.from('goals').select('*');
-    if (error) {
+    try {
+      const { data, error } = await supabase
+        .from('goals')
+        .select('*')
+        .eq('user_id', user?.id)
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        console.error('Error fetching goals:', error);
+      } else {
+        setGoals(data || []);
+      }
+    } catch (error) {
       console.error('Error fetching goals:', error);
-    } else {
-      setGoals(data);
     }
   };
 
   const handleAddGoal = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!user) {
+      alert('Please log in to add goals');
+      return;
+    }
     if (description.trim() === '' || stake === '') {
       alert('Please enter a valid goal description and a positive stake.');
       return;
     }
-    const { data, error } = await supabase
-      .from('goals')
-      .insert([{ description, stake: Number(stake) }])
-      .single();
-    if (error) {
+    try {
+      const { data, error } = await supabase
+        .from('goals')
+        .insert([
+          {
+            description,
+            stake: Number(stake),
+            user_id: user.id,
+          },
+        ])
+        .select()
+        .single();
+
+      if (error) {
+        console.error('Error adding goal:', error);
+        alert('Failed to add goal. Please try again.');
+      } else {
+        setGoals([data, ...goals]);
+        setDescription('');
+        setStake('');
+      }
+    } catch (error) {
       console.error('Error adding goal:', error);
-    } else {
-      setGoals([...goals, data]);
-      setDescription('');
-      setStake('');
+      alert('Failed to add goal. Please try again.');
     }
   };
 
   const handleDeleteGoal = async (id: number) => {
-    const { error } = await supabase.from('goals').delete().eq('id', id);
-    if (error) {
+    try {
+      const { error } = await supabase.from('goals').delete().eq('id', id);
+      if (error) {
+        console.error('Error deleting goal:', error);
+        alert('Failed to delete goal. Please try again.');
+      } else {
+        setGoals(goals.filter((goal) => goal.id !== id));
+      }
+    } catch (error) {
       console.error('Error deleting goal:', error);
-    } else {
-      setGoals(goals.filter((goal) => goal.id !== id));
+      alert('Failed to delete goal. Please try again.');
     }
   };
+
+  if (!user) {
+    return (
+      <div className='p-4'>
+        <h1 className='text-2xl font-semibold text-gray-900'>Goals</h1>
+        <p className='mt-4 text-gray-600'>
+          Please log in to view and manage your goals.
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div className='p-4'>
